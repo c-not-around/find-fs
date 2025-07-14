@@ -1,2 +1,4 @@
-# find-fs
-Searching for files using regular expressions
+# Find•Fs
+
+Search for files in selected folders using filters specified as regular expressions.
+
