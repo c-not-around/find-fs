@@ -179,7 +179,7 @@ type
       Invoke(() ->
         begin
           _SearchProgress.Value := 0;
-          _ElapsedInfo.Text     := 'Elapled: 0:00:00';
+          _ElapsedInfo.Text     := 'Elapsed: 0:00:00';
           _RemainingInfo.Text   := 'Remaining: -:--:--';
           _FilesCountInfo.Text  := 'Files: -/-';
           _StageInfo.Text       := 'Create files list ...';
@@ -717,7 +717,7 @@ type
       {$region Init}
       ResultMenuManageAbility();
       
-      _ElapsedInfo.Text     := 'Elapled: -:--:--';
+      _ElapsedInfo.Text     := 'Elapsed: -:--:--';
       _RemainingInfo.Text   := 'Remaining: -:--:--';
       _FilesCountInfo.Text  := 'Files: -/-';
       {$endregion}
