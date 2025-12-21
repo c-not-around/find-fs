@@ -31,6 +31,7 @@ uses System.Diagnostics;
 uses System.Drawing;
 uses System.Windows.Forms;
 uses UExtensions;
+uses UProgressTimer;
 
 
 type
@@ -56,59 +57,19 @@ type
     private _RemainingInfo     : ToolStripStatusLabel;
     private _FilesCountInfo    : ToolStripStatusLabel;
     private _StageInfo         : ToolStripStatusLabel;
-    private _ProgressTimer     : System.Timers.Timer;
-    private _StartTime         : DateTime;
-    private _TotalFilesLocker  : object;
+    private _ProgressTimer     : InfoTimer;
     private _TotalFilesCount   : integer;
-    private _CompletedLocker   : object;
     private _CompletedFiles    : integer;
     private _TotalFiltersCount : integer;
     private _CompletedFilters  : integer;
-    private _FindAbort         : boolean;
+    private _TaskInProgress    : boolean;
+    private _TaskCancel        : boolean;
     {$endregion}
     
-    {$region Handlers}
-    private procedure FindButtonClick(sender: object; e: EventArgs);
+    {$region Override}
+    protected procedure OnFormClosing(e: FormClosingEventArgs); override;
     begin
-      _FindButton.Enabled := false;
-      
-      if _FindButton.Text = '    Find' then
-        begin
-          var paths   := _pathsList.Lines;
-          var filters := _FindFilters.Lines;
-          
-          Task.Factory.StartNew(() -> FindTask(paths, filters));
-        end
-      else
-        _FindAbort := true;
-    end;
-    
-    private procedure SaveResultsClick(sender: object; e: EventArgs);
-    begin
-      var dialog          := new SaveFileDialog();
-      dialog.DefaultExt   := 'list';
-      dialog.Filter       := 'File names list (*.list)|*.list|' +
-                             'Plain text file (*.txt)|*.txt';
-      dialog.AddExtension := true;
-      dialog.Title        := 'Select file';
-      
-      if dialog.ShowDialog() = System.Windows.Forms.DialogResult.OK then
-        begin
-          var writer := &File.AppendText(dialog.FileName);
-          
-          foreach var filter: TreeNode in _Results.Nodes do
-            begin
-              writer.WriteLine($'[{filter.Text}]');
-              
-              foreach var line: TreeNode in filter.Nodes do
-                writer.WriteLine(line.Text);
-              
-              writer.WriteLine();
-            end;
-          
-          writer.Close();
-          writer.Dispose();
-        end;
+      e.Cancel := _TaskInProgress;
     end;
     {$endregion}
     
@@ -129,10 +90,11 @@ type
           
       _PathsList.Text := lines + path;
     end;
+    {$endregion}
     
-    private procedure LoadProgressUpdate();
+    {$region Tasks}
+    private procedure LoadProgressUpdate(dt: TimeSpan);
     begin
-      var dt      := DateTime.Now - _StartTime;
       var elapsed := $'Elapsed: {dt.Hours}:{dt.Minutes:d2}:{dt.Seconds:d2}';
       var files   := $'Files: {_TotalFilesCount}';
       
@@ -144,13 +106,11 @@ type
       );
     end;
     
-    private procedure FindProgressUpdate();
+    private procedure FindProgressUpdate(dt: TimeSpan);
     begin
       var total    := _TotalFilesCount * _TotalFiltersCount;
       var progress := Math.Min(_TotalFilesCount * _CompletedFilters + _CompletedFiles, total);
-      var dt       := DateTime.Now - _StartTime;
-      
-      var percent := Convert.ToInt32(100.0 * progress / total);
+      var percent  := Convert.ToInt32(100.0 * progress / total);
       
       var remaininig := 'Remaining: ';
       if progress > 0 then
@@ -178,13 +138,9 @@ type
       );
     end;
     
-    private procedure ProgressTimerLoadElapsed(sender: object; e: System.Timers.ElapsedEventArgs) := LoadProgressUpdate();
-    
-    private procedure ProgressTimerFindElapsed(sender: object; e: System.Timers.ElapsedEventArgs) := FindProgressUpdate();
-    
     private procedure BuildLinearFilesList(path: string; FilesList, ErrorList: List<string>);
     begin
-      if Directory.Exists(path) and not _FindAbort then
+      if Directory.Exists(path) and not _TaskCancel then
         begin
           var files  : array of string := nil;
           var folders: array of string := nil;
@@ -205,7 +161,7 @@ type
               foreach var f: string in files do
                 FilesList.Add(f);
               
-              lock _TotalFilesLocker do
+              lock _ProgressTimer.Locker do
                 _TotalFilesCount += files.Length;
             end;
         end;
@@ -213,7 +169,12 @@ type
     
     private procedure FindTask(paths, filters: array of string);
     begin
-      _FindAbort := false;
+      _TaskCancel     := false;
+      _TaskInProgress := true;
+      
+      {$region Make Files List}
+      _TotalFilesCount := 0;
+      _ProgressTimer   := new InfoTimer();
       
       Invoke(() ->
         begin
@@ -230,30 +191,22 @@ type
       var files  := new List<string>();
       var errors := new List<string>();
       
-      _StartTime              := DateTime.Now;
-      _ProgressTimer.Interval := 500.0;
-      _ProgressTimer.Elapsed  += ProgressTimerLoadElapsed;
-      _ProgressTimer.Enabled  := true;
-      _ProgressTimer.Start();
-      
-      _TotalFilesCount  := 0;
-      _TotalFilesLocker := new Object();
+      _ProgressTimer.Start(500, LoadProgressUpdate);
       
       foreach var path: string in paths do
         BuildLinearFilesList(path, files, errors);
       
       _ProgressTimer.Stop();
-      _ProgressTimer.Enabled := false;
-      _ProgressTimer.Elapsed -= ProgressTimerLoadElapsed;
       
       Invoke(() ->
         begin
-          LoadProgressUpdate();
           Cursor := Cursors.Default;
         end
       );
+      {$endregion}
       
-      if not _FindAbort then
+      {$region Search}
+      if not _TaskCancel then
         begin
           var FindNode              := new TreeNode(DateTime.Now.ToString('yyyy-MM-dd HH:mm:ss'));
           FindNode.ImageKey         := 'find';
@@ -292,17 +245,12 @@ type
           
           _TotalFiltersCount := filters.Length;
           _CompletedFilters  := 0;
-          _CompletedLocker   := new Object();
           
-          _StartTime              := DateTime.Now;
-          _ProgressTimer.Interval := 500.0;
-          _ProgressTimer.Elapsed  += ProgressTimerFindElapsed;
-          _ProgressTimer.Enabled  := true;
-          _ProgressTimer.Start();
+          _ProgressTimer.Start(500, FindProgressUpdate);
           
           foreach var filter: string in filters do
             begin
-              lock _CompletedLocker do
+              lock _ProgressTimer.Locker do
                 _CompletedFiles := 0;
               
               var regexp : Regex;
@@ -318,17 +266,17 @@ type
                     if regexp.IsMatch(f) then
                       results.Add(f);
                     
-                    lock _CompletedLocker do
+                    lock _ProgressTimer.Locker do
                       _CompletedFiles += 1;
                     
-                    if _FindAbort then
+                    if _TaskCancel then
                       break;
                   end;
               except on ex: Exception do
                 regerr := ex.Message;
               end;
               
-              lock _CompletedLocker do
+              lock _ProgressTimer.Locker do
                _CompletedFilters += 1;
               
               var FilterNode              := new TreeNode();
@@ -360,17 +308,13 @@ type
               
               FindNode.Nodes.Add(FilterNode);
               
-              if _FindAbort then
+              if _TaskCancel then
                 break;
             end;
           
           _ProgressTimer.Stop();
-          _ProgressTimer.Enabled := false;
-          _ProgressTimer.Elapsed -= ProgressTimerFindElapsed;
           
-          Invoke(() -> FindProgressUpdate());
-          
-          if not _FindAbort then
+          if not _TaskCancel then
             Invoke(() ->
               begin
                 _Results.Nodes.Add(FindNode);
@@ -378,22 +322,74 @@ type
               end
             );
         end;
-            
-      if not _FindAbort then
-        Invoke(() ->
-          begin
-            _StageInfo.Text := _FindAbort ? 'Aborted.' : 'Done.';
-          end
-        );
+      {$endregion}
       
       Invoke(() ->
         begin
+          _StageInfo.Text := _TaskCancel ? 'Aborted.' : 'Done.';
+          
           _FindButton.Text    := '    Find';
           _FindButton.Image   := Resources.Image('find.png');
           _FindButton.Enabled := true;
+          
           ResultMenuManageAbility();
         end
       );
+      
+      _ProgressTimer.Dispose();
+      
+      _TaskCancel     := false;
+      _TaskInProgress := false;
+    end;
+    {$endregion}
+    
+    {$region Handlers}
+    private procedure FindButtonClick(sender: object; e: EventArgs);
+    begin
+      _FindButton.Enabled := false;
+      
+      if not _TaskInProgress then
+        begin
+          var paths   := _pathsList.Lines;
+          var filters := _FindFilters.Lines;
+          
+          Task.Factory.StartNew(() -> FindTask(paths, filters));
+        end
+      else
+        begin
+          _StageInfo.Text := 'Canceling ...';
+          _TaskCancel     := true;
+        end;
+    end;
+    
+    private procedure SaveResultsClick(sender: object; e: EventArgs);
+    begin
+      var dialog          := new SaveFileDialog();
+      dialog.DefaultExt   := 'list';
+      dialog.Filter       := 'File names list (*.list)|*.list|' +
+                             'Plain text file (*.txt)|*.txt';
+      dialog.AddExtension := true;
+      dialog.Title        := 'Select file';
+      
+      if dialog.ShowDialog() = System.Windows.Forms.DialogResult.OK then
+        begin
+          var writer := &File.AppendText(dialog.FileName);
+          
+          foreach var filter: TreeNode in _Results.Nodes do
+            begin
+              writer.WriteLine($'[{filter.Text}]');
+              
+              foreach var line: TreeNode in filter.Nodes do
+                writer.WriteLine(line.Text);
+              
+              writer.WriteLine();
+            end;
+          
+          writer.Close();
+          writer.Dispose();
+        end;
+      
+      dialog.Dispose();
     end;
     {$endregion}
     
@@ -446,6 +442,8 @@ type
           
           if dialog.ShowDialog() = System.Windows.Forms.DialogResult.OK then
             AddSourcePath(dialog.SelectedPath);
+          
+          dialog.Dispose();
         end;
       _PathsListMenu.Items.Add(_PathsListMenuAddFolder);
       
@@ -789,9 +787,6 @@ type
       {$endregion}
       
       {$region Init}
-      _ProgressTimer         := new System.Timers.Timer();
-      _ProgressTimer.Enabled := false;
-      
       ResultMenuManageAbility();
       
       _ElapsedInfo.Text     := 'Elapsed: -:--:--';
