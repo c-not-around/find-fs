@@ -1,4 +1,4 @@
-﻿unit FindFsMainForm;
+﻿unit UMainForm;
 
 
 {$reference System.Drawing.dll}
@@ -7,12 +7,14 @@
 {$resource res\icon.ico}
 {$resource res\open.png}
 {$resource res\save.png}
+{$resource res\find.png}
+{$resource res\exit.png}
 {$resource res\copy.png}
 {$resource res\paste.png}
 {$resource res\clear.png}
 {$resource res\cut.png}
 {$resource res\delete.png}
-{$resource res\find.png}
+{$resource res\finds.png}
 {$resource res\error.png}
 {$resource res\folder.png}
 {$resource res\file.png}
@@ -28,7 +30,7 @@ uses System.Threading.Tasks;
 uses System.Diagnostics;
 uses System.Drawing;
 uses System.Windows.Forms;
-uses Extensions;
+uses UExtensions;
 
 
 type
@@ -70,7 +72,7 @@ type
     begin
       _FindButton.Enabled := false;
       
-      if _FindButton.Text = 'Find' then
+      if _FindButton.Text = '    Find' then
         begin
           var paths   := _pathsList.Lines;
           var filters := _FindFilters.Lines;
@@ -219,7 +221,8 @@ type
           _SearchProgress.Value := 0;
           _FilesCountInfo.Text  := 'Files: -/-';
           _StageInfo.Text       := 'Create files list ...';
-          _FindButton.Text      := 'Abort';
+          _FindButton.Text      := '    Abort';
+          _FindButton.Image     := Resources.Image('exit.png');
           _FindButton.Enabled   := true;
         end
       );
@@ -385,7 +388,8 @@ type
       
       Invoke(() ->
         begin
-          _FindButton.Text    := 'Find';
+          _FindButton.Text    := '    Find';
+          _FindButton.Image   := Resources.Image('find.png');
           _FindButton.Enabled := true;
           ResultMenuManageAbility();
         end
@@ -582,7 +586,7 @@ type
       _ResultNodeMenu := new System.Windows.Forms.ContextMenuStrip();
        
       var _ResultNodeMenuCopy   := new ToolStripMenuItem();
-      _ResultNodeMenuCopy.Text  := 'Copy'; 
+      _ResultNodeMenuCopy.Text  := 'Copy path'; 
       _ResultNodeMenuCopy.Image := Resources.Image('copy.png');
       _ResultNodeMenuCopy.Click += (sender, e) ->
         begin
@@ -605,7 +609,7 @@ type
       _ResultNodeMenu.Items.Add(_ResultNodeMenuCopy);
       
       var _ResultNodeMenuDel   := new ToolStripMenuItem();
-      _ResultNodeMenuDel.Text  := 'Delete'; 
+      _ResultNodeMenuDel.Text  := 'Exclude from result list'; 
       _ResultNodeMenuDel.Image := Resources.Image('delete.png');
       _ResultNodeMenuDel.Click += (sender, e) ->
         begin
@@ -641,7 +645,7 @@ type
       var _ImageList        := new ImageList();
       _ImageList.ColorDepth := ColorDepth.Depth32Bit;
       _ImageList.ImageSize  := new System.Drawing.Size(16, 16);
-      _ImageList.Images.Add('find',   Resources.Image('find.png'));
+      _ImageList.Images.Add('find',   Resources.Image('finds.png'));
       _ImageList.Images.Add('error',  Resources.Image('error.png'));
       _ImageList.Images.Add('folder', Resources.Image('folder.png'));
       _ImageList.Images.Add('file',   Resources.Image('file.png'));
@@ -677,6 +681,7 @@ type
               
               _ResultNodeMenu.Items[0].Visible := exp or (_Results.SelectedNode.Nodes.Count > 0);
               _ResultNodeMenu.Items[2].Visible := exp and (_Results.SelectedNode.ForeColor <> Color.Red);
+              _ResultNodeMenu.Items[0].Text    := exp ? 'Copy path' : 'Copy paths list';
             end;
         end;
       _MainContainer.Panel2.Controls.Add(_Results);
@@ -698,12 +703,14 @@ type
       _SaveResults.Click      += SaveResultsClick;
       _ActionsBox.Controls.Add(_SaveResults);
       
-      _FindButton          := new Button();
-      _FindButton.Size     := new System.Drawing.Size(_SaveResults.Width, _SaveResults.Height);
-      _FindButton.Location := new Point(_SaveResults.Left - _FindButton.Width - 5, _SaveResults.Top);
-      _FindButton.Anchor   := AnchorStyles.Bottom or AnchorStyles.Right;
-      _FindButton.Text     := 'Find';
-      _FindButton.Click    += FindButtonClick;
+      _FindButton            := new Button();
+      _FindButton.Size       := new System.Drawing.Size(_SaveResults.Width, _SaveResults.Height);
+      _FindButton.Location   := new Point(_SaveResults.Left - _FindButton.Width - 5, _SaveResults.Top);
+      _FindButton.Anchor     := AnchorStyles.Bottom or AnchorStyles.Right;
+      _FindButton.Text       := '    Find';
+      _FindButton.Image      := Resources.Image('find.png');
+      _FindButton.ImageAlign := ContentAlignment.MiddleLeft;
+      _FindButton.Click      += FindButtonClick;
       _ActionsBox.Controls.Add(_FindButton);
       
       _SearchProgress          := new ProgressBar();

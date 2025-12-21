@@ -8,7 +8,7 @@
 uses System;
 uses System.Globalization;
 uses System.Windows.Forms;
-uses FindFsMainForm;
+uses UMainForm;
 
 
 begin
