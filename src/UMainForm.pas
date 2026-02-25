@@ -36,6 +36,10 @@ uses System.Drawing;
 uses System.Windows.Forms;
 uses UExtensions;
 uses UProgressTimer;
+uses UFormat;
+uses UFileIcon;
+uses USearchResultView;
+uses UFilterResult;
 
 
 type
@@ -51,7 +55,8 @@ type
     private _FindFilters       : TextBox;
     private _ResultsMenu       : System.Windows.Forms.ContextMenuStrip;
     private _ResultNodeMenu    : System.Windows.Forms.ContextMenuStrip;
-    private _Results           : TreeView;
+    private _Results           : MatchTreeView;
+    private _ImageList         : ImageList;
     private _ActionsBox        : Panel;
     private _FindButton        : Button;
     private _SaveResults       : Button;
@@ -68,6 +73,7 @@ type
     private _CompletedFilters  : integer;
     private _TaskInProgress    : boolean;
     private _TaskCancel        : boolean;
+    private _FcusedControl     : Control;
     {$endregion}
     
     {$region Override}
@@ -91,6 +97,22 @@ type
           
       _PathsList.Text := lines + path;
     end;
+    
+    private function GetIconKeyFromExt(fname: string): string;
+    begin
+      var ext := Path.GetExtension(fname);
+      
+      if ext = '' then
+        exit('file');
+      
+      if ext = 'exe' then
+        ext := fname;
+      
+      if not _ImageList.Images.ContainsKey(ext) then
+        _ImageList.Images.Add(ext, GetFileIcon(fname));
+      
+      result := ext;
+    end;
     {$endregion}
     
     {$region Tasks}
@@ -111,7 +133,7 @@ type
     begin
       var total    := _TotalFilesCount * _TotalFiltersCount;
       var progress := Math.Min(_TotalFilesCount * _CompletedFilters + _CompletedFiles, total);
-      var percent  := Convert.ToInt32(100.0 * progress / total);
+      var percent  := total > 0 ? Convert.ToInt32(100.0 * progress / total) : 0;
       
       var remaininig := 'Remaining: ';
       if progress > 0 then
@@ -141,6 +163,9 @@ type
     
     private procedure BuildLinearFilesList(path: string; FilesList, ErrorList: List<string>);
     begin
+      if Regex.IsMatch(path, '[a-zA-Z]:\\((System Volume Information)|(\$RECYCLE\.BIN))', RegexOptions.IgnoreCase) then
+        exit;
+      
       if Directory.Exists(path) and not _TaskCancel then
         begin
           var files  : array of string := nil;
@@ -254,18 +279,19 @@ type
               lock _ProgressTimer.Locker do
                 _CompletedFiles := 0;
               
-              var regexp : Regex;
-              var regerr := '';
-              var results: List<string>;
+              var regexp  : Regex;
+              var regerr  := '';
+              var results := new List<FilterResult>();
               
+              if files.Count > 0 then
               try
                 regexp  := new Regex(filter, RegexOptions.IgnoreCase);
-                results := new List<string>();
                 
                 foreach var f: string in files do
                   begin
-                    if regexp.IsMatch(f) then
-                      results.Add(f);
+                    var m := regexp.Match(f);
+                    if m.Success then
+                      results.Add(new FilterResult(f, m));
                     
                     lock _ProgressTimer.Locker do
                       _CompletedFiles += 1;
@@ -290,14 +316,19 @@ type
                   FilterNode.Text := $'Filter "{filter}" {results.Count} matches';
                   
                   if results.Count > 0 then
-                    foreach var line: string in results do
-                      begin
-                        var node              := new TreeNode(line);
-                        node.ImageKey         := 'file';
-                        node.SelectedImageKey := 'file';
-                        node.ContextMenuStrip := _ResultNodeMenu;
-                        FilterNode.Nodes.Add(node);
-                      end
+                    begin
+                      var TotalWeight := int64(0);
+                      
+                      foreach var line: FilterResult in results do
+                        begin
+                          var node := new SearchResultNode(line, GetIconKeyFromExt(line.Path), _ResultNodeMenu);
+                          FilterNode.Nodes.Add(node);
+                          
+                          TotalWeight += (new FileInfo(line.Path)).Length;
+                        end;
+                      
+                      FilterNode.Text += $'. Total weight: {Format.BytesPrefix(TotalWeight)}';
+                    end
                   else
                     FilterNode.ToolTipText := 'No results for this filter';
                 end
@@ -345,15 +376,9 @@ type
     {$endregion}
     
     {$region Handlers}
-    private procedure ContainerMouseDown(sender: object; e: MouseEventArgs);
-    begin
-      
-    end;
+    private procedure ContainerMouseDown(sender: object; e: MouseEventArgs) := _FcusedControl := self.ActiveControl;
     
-    private procedure ContainerMouseUp(sender: object; e: MouseEventArgs);
-    begin
-      _PathsList.Select();
-    end;
+    private procedure ContainerMouseUp(sender: object; e: MouseEventArgs) := _FcusedControl.Select();
     
     private procedure PathsListMenuAddFolderClick(sender: object; e: EventArgs);
     begin
@@ -534,10 +559,10 @@ type
       _MainContainer.Size          := new System.Drawing.Size(ClientSize.Width - 6, ClientSize.Height - 50 - 6);
       _MainContainer.Anchor        := AnchorStyles.Left or AnchorStyles.Top or AnchorStyles.Right or AnchorStyles.Bottom;
       _MainContainer.BorderStyle   := System.Windows.Forms.BorderStyle.None;
-      _MainContainer.BackColor     := Color.LightGray;
       _MainContainer.Panel1MinSize := 200;
       _MainContainer.Panel2MinSize := 200;
-      _MainContainer.SplitterWidth := 5;
+      _MainContainer.SplitterWidth := 3;
+      _MainContainer.FixedPanel    := FixedPanel.Panel1;
       _MainContainer.MouseDown     += ContainerMouseDown;
       _MainContainer.MouseUp       += ContainerMouseUp;
       {$endregion}
@@ -548,11 +573,11 @@ type
       _LeftContainer.Size          := _MainContainer.Panel1.Size;
       _LeftContainer.Dock          := DockStyle.Fill;
       _LeftContainer.BorderStyle   := System.Windows.Forms.BorderStyle.None;
-      _LeftContainer.BackColor     := Color.LightGray;
       _LeftContainer.Orientation   := Orientation.Horizontal;
       _LeftContainer.Panel1MinSize := 200;
       _LeftContainer.Panel2MinSize := 200;
-      _LeftContainer.SplitterWidth := 5;
+      _LeftContainer.SplitterWidth := 3;
+      _LeftContainer.FixedPanel    := FixedPanel.Panel1;
       _LeftContainer.MouseDown     += ContainerMouseDown;
       _LeftContainer.MouseUp       += ContainerMouseUp;
       _MainContainer.Panel1.Controls.Add(_LeftContainer);
@@ -698,7 +723,7 @@ type
       _ResultNodeMenuOpen.Click += ResultNodeMenuOpenClick;
       _ResultNodeMenu.Items.Add(_ResultNodeMenuOpen);
       
-      var _ImageList        := new ImageList();
+      _ImageList            := new ImageList();
       _ImageList.ColorDepth := ColorDepth.Depth32Bit;
       _ImageList.ImageSize  := new System.Drawing.Size(16, 16);
       _ImageList.Images.Add('findd',  Resources.Image('findd.png'));
@@ -715,12 +740,12 @@ type
       _ResultsDesc.Text        := 'Search results:';
       _MainContainer.Panel2.Controls.Add(_ResultsDesc);
       
-      _Results                  := new TreeView();
+      _Results                  := new MatchTreeView();
       _Results.Location         := new Point(0, _ResultsDesc.Height);
       _Results.Size             := new System.Drawing.Size(_ResultsDesc.Width, _MainContainer.Panel2.ClientSize.Height - _ResultsDesc.Height);
       _Results.Anchor           := AnchorStyles.Left or AnchorStyles.Top or AnchorStyles.Right or AnchorStyles.Bottom;
       _Results.BorderStyle      := System.Windows.Forms.BorderStyle.FixedSingle;
-      _Results.Font             := new System.Drawing.Font('Consolas', 10, FontStyle.Regular, GraphicsUnit.Point);
+      _Results.Font             := new System.Drawing.Font('Consolas', 9.75, FontStyle.Regular, GraphicsUnit.Point);
       _Results.ItemHeight       := 18;
       _Results.ImageList        := _ImageList;
       _Results.ContextMenuStrip := _ResultsMenu;
@@ -846,3 +871,5 @@ type
 
 
 end.
+
+//	add folders search
