@@ -8,13 +8,17 @@
 {$resource res\open.png}
 {$resource res\save.png}
 {$resource res\find.png}
-{$resource res\exit.png}
+{$resource res\stop.png}
 {$resource res\copy.png}
 {$resource res\paste.png}
 {$resource res\clear.png}
 {$resource res\cut.png}
 {$resource res\delete.png}
-{$resource res\finds.png}
+{$resource res\copyp.png}
+{$resource res\list.png}
+{$resource res\explorer.png}
+{$resource res\findd.png}
+{$resource res\findf.png}
 {$resource res\error.png}
 {$resource res\folder.png}
 {$resource res\file.png}
@@ -67,10 +71,7 @@ type
     {$endregion}
     
     {$region Override}
-    protected procedure OnFormClosing(e: FormClosingEventArgs); override;
-    begin
-      e.Cancel := _TaskInProgress;
-    end;
+    protected procedure OnFormClosing(e: FormClosingEventArgs); override := e.Cancel := _TaskInProgress;
     {$endregion}
     
     {$region Routines}
@@ -183,7 +184,7 @@ type
           _FilesCountInfo.Text  := 'Files: -/-';
           _StageInfo.Text       := 'Create files list ...';
           _FindButton.Text      := '    Abort';
-          _FindButton.Image     := Resources.Image('exit.png');
+          _FindButton.Image     := Resources.Image('stop.png');
           _FindButton.Enabled   := true;
         end
       );
@@ -209,8 +210,8 @@ type
       if not _TaskCancel then
         begin
           var FindNode              := new TreeNode(DateTime.Now.ToString('yyyy-MM-dd HH:mm:ss'));
-          FindNode.ImageKey         := 'find';
-          FindNode.SelectedImageKey := 'find';
+          FindNode.ImageKey         := 'findd';
+          FindNode.SelectedImageKey := 'findd';
           
           if errors.Count > 0 then
             begin
@@ -280,8 +281,8 @@ type
                _CompletedFilters += 1;
               
               var FilterNode              := new TreeNode();
-              FilterNode.ImageKey         := 'folder';
-              FilterNode.SelectedImageKey := 'folder';
+              FilterNode.ImageKey         := 'findf';
+              FilterNode.SelectedImageKey := 'findf';
               FilterNode.ContextMenuStrip := _ResultNodeMenu;
               
               if regerr = '' then
@@ -344,25 +345,63 @@ type
     {$endregion}
     
     {$region Handlers}
-    private procedure FindButtonClick(sender: object; e: EventArgs);
+    private procedure ContainerMouseDown(sender: object; e: MouseEventArgs);
     begin
-      _FindButton.Enabled := false;
       
-      if not _TaskInProgress then
+    end;
+    
+    private procedure ContainerMouseUp(sender: object; e: MouseEventArgs);
+    begin
+      _PathsList.Select();
+    end;
+    
+    private procedure PathsListMenuAddFolderClick(sender: object; e: EventArgs);
+    begin
+      var dialog := new FolderBrowserDialog();
+      
+      if dialog.ShowDialog() = System.Windows.Forms.DialogResult.OK then
+        AddSourcePath(dialog.SelectedPath);
+      
+      dialog.Dispose();
+    end;
+    
+    private procedure PathsListMouseDown(sender: object; e: MouseEventArgs);
+    begin
+      if e.Button = System.Windows.Forms.MouseButtons.Right then
         begin
-          var paths   := _pathsList.Lines;
-          var filters := _FindFilters.Lines;
-          
-          Task.Factory.StartNew(() -> FindTask(paths, filters));
-        end
-      else
-        begin
-          _StageInfo.Text := 'Canceling ...';
-          _TaskCancel     := true;
+          _PathsList.ContextMenuStrip.Items[1].Enabled := _PathsList.TextLength      > 0;
+          _PathsList.ContextMenuStrip.Items[2].Enabled := _PathsList.SelectionLength > 0;
+          _PathsList.ContextMenuStrip.Items[3].Enabled := _PathsList.SelectionLength > 0;
         end;
     end;
     
-    private procedure SaveResultsClick(sender: object; e: EventArgs);
+    private procedure PathsListDragDrop(sender: object; e: DragEventArgs);
+    begin
+      var paths := e.Data.GetData(DataFormats.FileDrop) as PathsNames;
+      
+      if paths <> nil then
+        foreach var path in paths do
+          if Directory.Exists(path) then
+            AddSourcePath(path);
+    end;
+    
+    private procedure FindFiltersMouseDown(sender: object; e: MouseEventArgs);
+    begin
+      if e.Button =  System.Windows.Forms.MouseButtons.Right then
+        begin
+          _FindFilters.ContextMenuStrip.Items[0].Enabled := _FindFilters.TextLength      > 0;
+          _FindFilters.ContextMenuStrip.Items[1].Enabled := _FindFilters.SelectionLength > 0;
+          _FindFilters.ContextMenuStrip.Items[2].Enabled := _FindFilters.SelectionLength > 0;
+        end;
+    end;
+    
+    private procedure ResultsMenuClearClick(sender: object; e: EventArgs);
+    begin
+      _Results.Nodes.Clear();
+      ResultMenuManageAbility();
+    end;
+    
+    private procedure ResultsMenuExportClick(sender: object; e: EventArgs);
     begin
       var dialog          := new SaveFileDialog();
       dialog.DefaultExt   := 'list';
@@ -391,6 +430,91 @@ type
       
       dialog.Dispose();
     end;
+    
+    private procedure ResultNodeMenuCopyClick(sender: object; e: EventArgs);
+    begin
+      var node := _Results.SelectedNode;
+      
+      if node <> nil then
+        begin
+          var lines := '';
+          
+          if node.Level = 2 then
+            lines := _Results.SelectedNode.Text
+          else if node.Level = 1 then
+            foreach var n: TreeNode in node.Nodes do
+              lines += n.Text + #13#10;
+          
+          if lines <> '' then
+            Clipboard.SetText(lines);
+        end;
+    end;
+    
+    private procedure ResultNodeMenuDelClick(sender: object; e: EventArgs);
+    begin
+      var node := _Results.SelectedNode;
+      
+      if node <> nil then
+        _Results.Nodes.Remove(node);
+      
+      ResultMenuManageAbility();
+    end;
+    
+    private procedure ResultNodeMenuOpenClick(sender: object; e: EventArgs);
+    begin
+      var node := _Results.SelectedNode;
+      
+      if (node <> nil) and (node.Level = 2) then
+        begin
+          var path := node.Text.Substring(0, node.Text.LastIndexOf('\'));
+          
+          try
+            Process.Start('explorer', path);
+          except on ex: Exception do
+            Message.Error($'command "explorer {path}" execution error: {ex.Message}');
+          end;
+        end;
+    end;
+    
+    private procedure ResultsMouseClick(sender: object; e: MouseEventArgs);
+    begin
+      if e.Button = System.Windows.Forms.MouseButtons.Right then
+        begin
+          _Results.SelectedNode := _Results.GetNodeAt(e.Location);
+          
+          var exp := (_Results.SelectedNode <> nil) and (_Results.SelectedNode.Level = 2);
+          
+          _ResultNodeMenu.Items[0].Visible := exp or (_Results.SelectedNode.Nodes.Count > 0);
+          _ResultNodeMenu.Items[2].Visible := exp and (_Results.SelectedNode.ForeColor <> Color.Red);
+          
+          _ResultNodeMenu.Items[0].Text    := exp ? 'Copy path' : 'Copy paths list';
+          _ResultNodeMenu.Items[0].Image   := Resources.Image(exp ? 'copyp.png' : 'list.png');
+        end;
+    end;
+    
+    private procedure FindButtonClick(sender: object; e: EventArgs);
+    begin
+      _FindButton.Enabled := false;
+      
+      if not _TaskInProgress then
+        begin
+          var paths   := _PathsList.Lines;
+          var filters := _FindFilters.Lines;
+          
+          if (paths <> nil) and (paths.Length > 0) and (filters <> nil) and (filters.Length > 0) then
+            Task.Factory.StartNew(() -> FindTask(paths, filters))
+          else
+            begin
+              Message.Error('Paths list or filters list is empty.');
+              _FindButton.Enabled := true;
+            end;
+        end
+      else
+        begin
+          _StageInfo.Text := 'Canceling ...';
+          _TaskCancel     := true;
+        end;
+    end;
     {$endregion}
     
     {$region Ctors}
@@ -414,6 +538,8 @@ type
       _MainContainer.Panel1MinSize := 200;
       _MainContainer.Panel2MinSize := 200;
       _MainContainer.SplitterWidth := 5;
+      _MainContainer.MouseDown     += ContainerMouseDown;
+      _MainContainer.MouseUp       += ContainerMouseUp;
       {$endregion}
       
       {$region LeftContainer}
@@ -427,6 +553,8 @@ type
       _LeftContainer.Panel1MinSize := 200;
       _LeftContainer.Panel2MinSize := 200;
       _LeftContainer.SplitterWidth := 5;
+      _LeftContainer.MouseDown     += ContainerMouseDown;
+      _LeftContainer.MouseUp       += ContainerMouseUp;
       _MainContainer.Panel1.Controls.Add(_LeftContainer);
       {$endregion}
       
@@ -436,15 +564,7 @@ type
       var _PathsListMenuAddFolder   := new ToolStripMenuItem();
       _PathsListMenuAddFolder.Text  := 'Add folder'; 
       _PathsListMenuAddFolder.Image := Resources.Image('open.png');
-      _PathsListMenuAddFolder.Click += (sender, e) ->
-        begin
-          var dialog := new FolderBrowserDialog();
-          
-          if dialog.ShowDialog() = System.Windows.Forms.DialogResult.OK then
-            AddSourcePath(dialog.SelectedPath);
-          
-          dialog.Dispose();
-        end;
+      _PathsListMenuAddFolder.Click += PathsListMenuAddFolderClick;
       _PathsListMenu.Items.Add(_PathsListMenuAddFolder);
       
       var _PathsListMenuClear   := new ToolStripMenuItem();
@@ -488,25 +608,10 @@ type
       _PathsList.WordWrap         := false;
       _PathsList.Font             := new System.Drawing.Font('Consolas', 10, FontStyle.Regular, GraphicsUnit.Point);
       _PathsList.ContextMenuStrip := _PathsListMenu;
-      _PathsList.MouseDown        += (sender, e) -> 
-        begin
-          if e.Button =  System.Windows.Forms.MouseButtons.Right then
-            begin
-              _PathsList.ContextMenuStrip.Items[1].Enabled := _PathsList.TextLength > 0;
-              _PathsList.ContextMenuStrip.Items[2].Enabled := _PathsList.SelectionLength > 0;
-              _PathsList.ContextMenuStrip.Items[3].Enabled := _PathsList.SelectionLength > 0;
-            end;
-        end;
       _PathsList.AllowDrop        := true;
+      _PathsList.MouseDown        += PathsListMouseDown;
       _PathsList.DragEnter        += (sender, e) -> begin e.Effect := DragDropEffects.All; end;
-      _PathsList.DragDrop         += (sender, e) -> 
-        begin
-          var paths := e.Data.GetData(DataFormats.FileDrop) as PathsNames;
-          
-          foreach var path in paths do
-            if Directory.Exists(path) then
-              AddSourcePath(path);
-        end;
+      _PathsList.DragDrop         += PathsListDragDrop;
       _LeftContainer.Panel1.Controls.Add(_PathsList);
       {$endregion}
       
@@ -554,15 +659,7 @@ type
       _FindFilters.WordWrap         := false;
       _FindFilters.Font             := new System.Drawing.Font('Consolas', 10, FontStyle.Regular, GraphicsUnit.Point);
       _FindFilters.ContextMenuStrip := _FindFiltersMenu;
-      _FindFilters.MouseDown        += (sender, e) -> 
-        begin
-          if e.Button =  System.Windows.Forms.MouseButtons.Right then
-            begin
-              _FindFilters.ContextMenuStrip.Items[0].Enabled := _FindFilters.TextLength > 0;
-              _FindFilters.ContextMenuStrip.Items[1].Enabled := _FindFilters.SelectionLength > 0;
-              _FindFilters.ContextMenuStrip.Items[2].Enabled := _FindFilters.SelectionLength > 0;
-            end;
-        end;
+      _FindFilters.MouseDown        += FindFiltersMouseDown;
       _LeftContainer.Panel2.Controls.Add(_FindFilters);
       {$endregion}
       
@@ -572,79 +669,41 @@ type
       var _ResultsMenuClear   := new ToolStripMenuItem();
       _ResultsMenuClear.Text  := 'Clear'; 
       _ResultsMenuClear.Image := Resources.Image('clear.png');
-      _ResultsMenuClear.Click += (sender, e) -> begin _Results.Nodes.Clear(); ResultMenuManageAbility(); end;
+      _ResultsMenuClear.Click += ResultsMenuClearClick;
       _ResultsMenu.Items.Add(_ResultsMenuClear);
       
-      var _ResultsMenuCut   := new ToolStripMenuItem();
-      _ResultsMenuCut.Text  := 'Export'; 
-      _ResultsMenuCut.Image := Resources.Image('save.png');
-      _ResultsMenuCut.Click += SaveResultsClick;
-      _ResultsMenu.Items.Add(_ResultsMenuCut);
+      var _ResultsMenuExport   := new ToolStripMenuItem();
+      _ResultsMenuExport.Text  := 'Export'; 
+      _ResultsMenuExport.Image := Resources.Image('save.png');
+      _ResultsMenuExport.Click += ResultsMenuExportClick;
+      _ResultsMenu.Items.Add(_ResultsMenuExport);
       
       _ResultNodeMenu := new System.Windows.Forms.ContextMenuStrip();
        
       var _ResultNodeMenuCopy   := new ToolStripMenuItem();
       _ResultNodeMenuCopy.Text  := 'Copy path'; 
-      _ResultNodeMenuCopy.Image := Resources.Image('copy.png');
-      _ResultNodeMenuCopy.Click += (sender, e) ->
-        begin
-          var node := _Results.SelectedNode;
-          
-          if node <> nil then
-            begin
-              var lines := '';
-              
-              if node.Level = 2 then
-                lines := _Results.SelectedNode.Text
-              else if node.Level = 1 then
-                foreach var n: TreeNode in node.Nodes do
-                  lines += n.Text + #13#10;
-              
-              if lines <> '' then
-                Clipboard.SetText(lines);
-            end;
-        end;
+      _ResultNodeMenuCopy.Image := Resources.Image('copyp.png');
+      _ResultNodeMenuCopy.Click += ResultNodeMenuCopyClick;
       _ResultNodeMenu.Items.Add(_ResultNodeMenuCopy);
       
       var _ResultNodeMenuDel   := new ToolStripMenuItem();
       _ResultNodeMenuDel.Text  := 'Exclude from result list'; 
       _ResultNodeMenuDel.Image := Resources.Image('delete.png');
-      _ResultNodeMenuDel.Click += (sender, e) ->
-        begin
-          var node := _Results.SelectedNode;
-          
-          if node <> nil then
-            _Results.Nodes.Remove(node);
-          
-          ResultMenuManageAbility();
-        end;
+      _ResultNodeMenuDel.Click += ResultNodeMenuDelClick;
       _ResultNodeMenu.Items.Add(_ResultNodeMenuDel);
       
       var _ResultNodeMenuOpen   := new ToolStripMenuItem();
       _ResultNodeMenuOpen.Text  := 'Open file location'; 
-      _ResultNodeMenuOpen.Image := Resources.Image('folder.png');
-      _ResultNodeMenuOpen.Click += (sender, e) ->
-        begin
-          var node := _Results.SelectedNode;
-          
-          if (node <> nil) and (node.Level = 2) then
-            begin
-              var path := node.Text.Substring(0, node.Text.LastIndexOf('\'));
-              
-              try
-                Process.Start('explorer', path);
-              except on ex: Exception do
-                Message.Error($'command "explorer {path}" execution error: {ex.Message}');
-              end;
-            end;
-        end;
+      _ResultNodeMenuOpen.Image := Resources.Image('explorer.png');
+      _ResultNodeMenuOpen.Click += ResultNodeMenuOpenClick;
       _ResultNodeMenu.Items.Add(_ResultNodeMenuOpen);
       
       var _ImageList        := new ImageList();
       _ImageList.ColorDepth := ColorDepth.Depth32Bit;
       _ImageList.ImageSize  := new System.Drawing.Size(16, 16);
-      _ImageList.Images.Add('find',   Resources.Image('finds.png'));
+      _ImageList.Images.Add('findd',  Resources.Image('findd.png'));
       _ImageList.Images.Add('error',  Resources.Image('error.png'));
+      _ImageList.Images.Add('findf',  Resources.Image('findf.png'));
       _ImageList.Images.Add('folder', Resources.Image('folder.png'));
       _ImageList.Images.Add('file',   Resources.Image('file.png'));
       
@@ -669,19 +728,7 @@ type
       _Results.ShowPlusMinus    := true;
       _Results.Scrollable       := true;
       _Results.ShowNodeToolTips := true;
-      _Results.MouseClick       += (sender, e) ->
-        begin
-          if e.Button = System.Windows.Forms.MouseButtons.Right then
-            begin
-              _Results.SelectedNode := _Results.GetNodeAt(e.Location);
-              
-              var exp := (_Results.SelectedNode <> nil) and (_Results.SelectedNode.Level = 2);
-              
-              _ResultNodeMenu.Items[0].Visible := exp or (_Results.SelectedNode.Nodes.Count > 0);
-              _ResultNodeMenu.Items[2].Visible := exp and (_Results.SelectedNode.ForeColor <> Color.Red);
-              _ResultNodeMenu.Items[0].Text    := exp ? 'Copy path' : 'Copy paths list';
-            end;
-        end;
+      _Results.MouseClick       += ResultsMouseClick;
       _MainContainer.Panel2.Controls.Add(_Results);
       {$endregion}
       
@@ -698,7 +745,7 @@ type
       _SaveResults.Text       := '    Export';
       _SaveResults.Image      := Resources.Image('save.png');
       _SaveResults.ImageAlign := ContentAlignment.MiddleLeft;
-      _SaveResults.Click      += SaveResultsClick;
+      _SaveResults.Click      += ResultsMenuExportClick;
       _ActionsBox.Controls.Add(_SaveResults);
       
       _FindButton            := new Button();

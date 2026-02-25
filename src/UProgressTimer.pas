@@ -38,14 +38,15 @@ type
       _Locker    := new object();
       _StartTime := DateTime.Now;
       Enabled    := true;
+      
       inherited Start();
     end;
 
     public procedure Stop();
     begin
       inherited Stop();
+      
       Enabled := false;
-
       _Handler(DateTime.Now - _StartTime);
     end;
     {$endregion}

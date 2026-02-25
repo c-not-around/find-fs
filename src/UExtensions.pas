@@ -6,7 +6,6 @@
 
 
 uses System;
-uses System.IO;
 uses System.Drawing;
 uses System.Windows.Forms;
 
