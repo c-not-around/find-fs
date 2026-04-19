@@ -2,4 +2,5 @@
 
 Search for files in selected folders using filters specified as regular expressions.
 
-![screen](https://raw.githubusercontent.com/c-not-around/find-fs/80c0a2984e82a061f49d15edc6e7e57d21600de3/screen.png)
+![screen](https://github.com/c-not-around/find-fs/blob/f640a1e713add68562f96a06fe5741ce34c5b9a8/screen_build_list.png)
+![screen](https://github.com/c-not-around/find-fs/blob/f640a1e713add68562f96a06fe5741ce34c5b9a8/screen_result.png)
