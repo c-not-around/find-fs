@@ -73,11 +73,32 @@ type
     private _CompletedFilters  : integer;
     private _TaskInProgress    : boolean;
     private _TaskCancel        : boolean;
-    private _FcusedControl     : Control;
+    private _FocusedControl    : Control;
     {$endregion}
     
     {$region Override}
-    protected procedure OnFormClosing(e: FormClosingEventArgs); override := e.Cancel := _TaskInProgress;
+    protected procedure OnFormClosing(e: FormClosingEventArgs); override;
+    begin
+      if _TaskInProgress then
+        begin
+          e.Cancel := true;
+          exit;
+        end;
+      
+      if _ImageList <> nil then
+        begin
+          _ImageList.Dispose();
+          _ImageList := nil;
+        end;
+      
+      if _ProgressTimer <> nil then
+        begin
+          _ProgressTimer.Dispose();
+          _ProgressTimer := nil;
+        end;
+      
+      inherited OnFormClosing(e);
+    end;
     {$endregion}
     
     {$region Routines}
@@ -100,16 +121,26 @@ type
     
     private function GetIconKeyFromExt(fname: string): string;
     begin
-      var ext := Path.GetExtension(fname);
+      fname := fname.ToLower();
       
-      if ext = '' then
+      var ext := Path.GetExtension(fname).TrimStart('.');
+      var exe := ext = 'exe';
+      
+      if String.IsNullOrEmpty(ext) then
         exit('file');
       
-      if ext = 'exe' then
-        ext := fname;
+      if exe then
+        ext := fname.GetHashCode().ToString('X');
       
       if not _ImageList.Images.ContainsKey(ext) then
-        _ImageList.Images.Add(ext, GetFileIcon(fname));
+        begin
+          var ico := GetFileIcon(fname, not exe);
+          
+          if ico <> nil then
+            _ImageList.Images.Add(ext, ico)
+          else
+            ext := 'file';
+        end;
       
       result := ext;
     end;
@@ -376,9 +407,9 @@ type
     {$endregion}
     
     {$region Handlers}
-    private procedure ContainerMouseDown(sender: object; e: MouseEventArgs) := _FcusedControl := self.ActiveControl;
+    private procedure ContainerMouseDown(sender: object; e: MouseEventArgs) := _FocusedControl := self.ActiveControl;
     
-    private procedure ContainerMouseUp(sender: object; e: MouseEventArgs) := _FcusedControl.Select();
+    private procedure ContainerMouseUp(sender: object; e: MouseEventArgs) := _FocusedControl.Select();
     
     private procedure PathsListMenuAddFolderClick(sender: object; e: EventArgs);
     begin
